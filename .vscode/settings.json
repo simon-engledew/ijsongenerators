@@ -1,0 +1,6 @@
+{
+  "editor.formatOnSave": true,
+  "editor.tabSize": 4,
+  "python.formatting.provider": "black",
+  "python.pythonPath": "/Users/simon/.pyenv/versions/3.8.3/bin/python"
+}
