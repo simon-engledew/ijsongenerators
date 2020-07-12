@@ -21,7 +21,7 @@ def _drain_unused(generator):
         collections.deque(generator, maxlen=0)
 
 
-def sendone(generator, value):
+def with_materialize(generator, value):
     generator.send(None)
     yield generator.send(value)
     yield from generator
@@ -36,16 +36,16 @@ def _ijson_value(parser, current, materialize):
     if event == "start_map":
         reader = _ijson_map_reader(parser, current=current)
         if materialize is None:
-            return sendone(reader, None)
+            return with_materialize(reader, None)
         if materialize is True:
-            return dict((k, v) for k, v in sendone(reader, True))
+            return dict((k, v) for k, v in with_materialize(reader, True))
         return reader
     elif event == "start_array":
         reader = _ijson_array_reader(parser, current=current)
         if materialize is None:
-            return sendone(reader, None)
+            return with_materialize(reader, None)
         if materialize is True:
-            return [v for _, v in sendone(reader, True)]
+            return [v for _, v in with_materialize(reader, True)]
         return reader
     else:
         return value
@@ -110,7 +110,7 @@ def parse(fileobj: typing.IO,) -> MapGenerator:
     """
     parse a JSON document and return the results as nested generators
     """
-    return sendone(_ijson_map_reader(ijson.basic_parse(fileobj)), None)
+    return with_materialize(_ijson_map_reader(ijson.basic_parse(fileobj)), None)
 
 
 class WILDCARD:
@@ -142,11 +142,11 @@ def _search(
     head, *rest = path
     last = len(rest) == 0
 
-    for k, v in sendone(generator, last):
+    for k, v in with_materialize(generator, last):
         if k == head:
             if last:
                 if isinstance(v, types.GeneratorType):
-                    yield from sendone(v, True)
+                    yield from with_materialize(v, True)
                 else:
                     yield v
             else:
