@@ -1,6 +1,16 @@
 import ijson
 import functools
 import typing
+import contextlib
+import types
+import collections
+
+
+@contextlib.contextmanager
+def _drain_unused(generator):
+    yield generator
+    if isinstance(generator, types.GeneratorType):
+        collections.deque(generator, maxlen=0)
 
 
 def _ijson_value(parser, current):
@@ -45,13 +55,10 @@ def _ijson_array_reader(parser, prefix, current=None):
         if current_prefix == prefix and current_event == "end_array":
             return
 
-        if current_prefix != item_prefix:
-            continue
+        assert current_prefix == item_prefix
 
-        if current_event in ("map_key", "end_map"):
-            continue
-
-        yield (idx, _ijson_value(parser, current))
+        with _drain_unused(_ijson_value(parser, current)) as value:
+            yield (idx, value)
 
         idx += 1
 
@@ -75,8 +82,7 @@ def _ijson_map_reader(parser, prefix, current=None):
     assert current_value == None
 
     for key_prefix, key_event, key in parser:
-        if key_prefix != prefix:
-            continue
+        assert key_prefix == prefix
 
         if key_event == "end_map":
             return
@@ -88,9 +94,8 @@ def _ijson_map_reader(parser, prefix, current=None):
         if current is None:
             return
 
-        value_prefix, value_event, value = current
-
-        yield (key, _ijson_value(parser, current))
+        with _drain_unused(_ijson_value(parser, current)) as value:
+            yield (key, value)
 
 
 def parse(fileobj: typing.IO):
