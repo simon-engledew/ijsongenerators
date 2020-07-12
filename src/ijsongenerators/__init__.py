@@ -4,6 +4,9 @@ import typing
 
 
 def _ijson_value(parser, current):
+    """
+    dispatches the current event to the correct reader or returns value if it is a literal
+    """
     current_prefix, current_event, current_value = current
 
     if current_event == "start_map":
@@ -15,6 +18,11 @@ def _ijson_value(parser, current):
 
 
 def _ijson_array_reader(parser, prefix, current=None):
+    """
+    reads items from the stream until the end_array is matched
+
+    ignores any items from unconsumed generators that do not have the expected prefix
+    """
     if current is None:
         current = next(parser, None)
 
@@ -49,6 +57,11 @@ def _ijson_array_reader(parser, prefix, current=None):
 
 
 def _ijson_map_reader(parser, prefix, current=None):
+    """
+    reads pairs from the stream until the end_map is matched
+
+    ignores any pairs from unconsumed generators that do not have the expected prefix
+    """
     if current is None:
         current = next(parser, None)
 
