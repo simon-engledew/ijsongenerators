@@ -29,6 +29,8 @@ def _ijson_array_reader(parser, prefix, current=None):
 
     item_prefix = f"{current_prefix}.item"
 
+    idx = 0
+
     for current in parser:
         current_prefix, current_event, current_value = current
 
@@ -38,29 +40,14 @@ def _ijson_array_reader(parser, prefix, current=None):
         if current_prefix != item_prefix:
             continue
 
-        yield _ijson_value(parser, current)
+        if current_event in ("map_key", "end_map"):
+            continue
+
+        yield (idx, _ijson_value(parser, current))
+
+        idx += 1
 
 
-class PairsIterator:
-    def __init__(self, generator):
-        self.generator = generator
-
-    def __iter__(self):
-        return (k for k, _ in self.generator)
-
-    def items(self):
-        return self.generator
-
-
-def pairsiterator(fn):
-    @functools.wraps(fn)
-    def wrapped(*args, **kwargs):
-        return PairsIterator(fn(*args, **kwargs))
-
-    return wrapped
-
-
-@pairsiterator
 def _ijson_map_reader(parser, prefix, current=None):
     if current is None:
         current = next(parser, None)
