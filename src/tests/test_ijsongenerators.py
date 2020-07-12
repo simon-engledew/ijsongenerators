@@ -1,6 +1,7 @@
 import io
 import pytest
 import ijsongenerators
+import itertools
 
 
 def test_map_array():
@@ -42,6 +43,48 @@ def test_skip_array():
     ):
         assert k == "moose"
         assert list(k for (k, _) in v) == ["a", "b", "c"]
+
+
+def test_search():
+    for v in ijsongenerators.search(
+        ijsongenerators.parse(
+            io.BytesIO(
+                b'{"moose": {"a": [1, 2, 3], "b": {"nested": [1, 2, 3]}, "c": [1, 2, 3]}}'
+            )
+        ),
+        "moose",
+        "a",
+        2,
+    ):
+        assert v == 3
+
+    for v in ijsongenerators.search(
+        ijsongenerators.parse(
+            io.BytesIO(
+                b'{"moose": {"a": [1, 2, 3], "b": {"nested": [1, 2, 3]}, "c": [1, 2, 3]}}'
+            )
+        ),
+        "moose",
+        "b",
+        "nested",
+        0,
+    ):
+        assert v == 1
+
+
+def test_search_wildcard():
+    gen = ijsongenerators.search(
+        ijsongenerators.parse(
+            io.BytesIO(
+                b'{"moose": {"a": [1, 2, 3], "b": {"nested": [1, 2, 3]}, "c": [4, 5, 6]}}'
+            )
+        ),
+        ijsongenerators.WILDCARD,  #  match moose / b / c
+        ijsongenerators.WILDCARD,  # match a / nested / array
+    )
+    assert next(gen) == [1, 2, 3]
+    assert next(gen) == {"nested": [1, 2, 3]}
+    assert next(gen) == [4, 5, 6]
 
 
 def test_skip_nested():
