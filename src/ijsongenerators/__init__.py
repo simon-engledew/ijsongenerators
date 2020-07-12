@@ -9,8 +9,6 @@ import threading
 
 END = object()
 
-options = threading.local()
-
 MapGenerator = typing.Generator[typing.Tuple[str, "T"], None, None]
 ArrayGenerator = typing.Generator[typing.Tuple[int, "T"], None, None]
 T = typing.Union[MapGenerator, ArrayGenerator, str, int, None, bool]
@@ -23,7 +21,13 @@ def _drain_unused(generator):
         collections.deque(generator, maxlen=0)
 
 
-def _ijson_value(parser, current):
+def sendone(generator, value):
+    generator.send(None)
+    yield generator.send(value)
+    yield from generator
+
+
+def _ijson_value(parser, current, materialize):
     """
     dispatches the current event to the correct reader or returns value if it is a literal
     """
@@ -31,13 +35,17 @@ def _ijson_value(parser, current):
 
     if event == "start_map":
         reader = _ijson_map_reader(parser, current=current)
-        if options.consume:
-            return dict((k, v) for k, v in reader)
+        if materialize is None:
+            return sendone(reader, None)
+        if materialize is True:
+            return dict((k, v) for k, v in sendone(reader, True))
         return reader
     elif event == "start_array":
         reader = _ijson_array_reader(parser, current=current)
-        if options.consume:
-            return [v for _, v in reader]
+        if materialize is None:
+            return sendone(reader, None)
+        if materialize is True:
+            return [v for _, v in sendone(reader, True)]
         return reader
     else:
         return value
@@ -47,6 +55,8 @@ def _ijson_array_reader(parser, current=None):
     """
     reads items from the stream until the end_array is matched
     """
+    materialize = yield
+
     if current is None:
         current = next(parser, END)
 
@@ -63,7 +73,7 @@ def _ijson_array_reader(parser, current=None):
         if event == "end_array":
             return
 
-        with _drain_unused(_ijson_value(parser, current)) as value:
+        with _drain_unused(_ijson_value(parser, current, materialize)) as value:
             yield (idx, value)
 
         idx += 1
@@ -73,6 +83,8 @@ def _ijson_map_reader(parser, current=None):
     """
     reads pairs from the stream until the end_map is matched
     """
+    materialize = yield
+
     if current is None:
         current = next(parser, END)
 
@@ -90,7 +102,7 @@ def _ijson_map_reader(parser, current=None):
         if current is END:
             return
 
-        with _drain_unused(_ijson_value(parser, current)) as value:
+        with _drain_unused(_ijson_value(parser, current, materialize)) as value:
             yield (key, value)
 
 
@@ -98,8 +110,7 @@ def parse(fileobj: typing.IO,) -> MapGenerator:
     """
     parse a JSON document and return the results as nested generators
     """
-    options.consume = False
-    return _ijson_map_reader(ijson.basic_parse(fileobj))
+    return sendone(_ijson_map_reader(ijson.basic_parse(fileobj)), None)
 
 
 class WILDCARD:
@@ -111,24 +122,36 @@ WILDCARD = WILDCARD()
 
 
 def search(
-    generator: typing.Union[MapGenerator, ArrayGenerator],
-    *paths: typing.Union[str, int]
-):
-    path, *rest = paths
-    last = len(paths) == 1
-    options.consume = last
-    try:
-        for k, v in generator:
-            if k == path:
-                if last:
-                    if isinstance(v, types.GeneratorType):
-                        yield from v
-                    else:
-                        yield v
+    fileobj: typing.IO, *path: typing.Union[str, int]
+) -> typing.Generator[
+    typing.Union[typing.Dict, typing.List, bool, str, int, None], None, None
+]:
+    """
+    return a list of all matching items at path, where path is a list of keys
+
+    e.g: search(json, 'users' ijsongenerators.WILDCARD, 'sessions', 0, 'hash')
+    """
+    return _search(_ijson_map_reader(ijson.basic_parse(fileobj)), *path)
+
+
+def _search(
+    generator: typing.Union[MapGenerator, ArrayGenerator], *path: typing.Union[str, int]
+) -> typing.Generator[
+    typing.Union[typing.Dict, typing.List, bool, str, int, None], None, None
+]:
+    head, *rest = path
+    last = len(rest) == 0
+
+    for k, v in sendone(generator, last):
+        if k == head:
+            if last:
+                if isinstance(v, types.GeneratorType):
+                    yield from sendone(v, True)
                 else:
-                    yield from search(v, *rest)
-    finally:
-        options.consume = False
+                    yield v
+            else:
+                if isinstance(v, types.GeneratorType):
+                    yield from _search(v, *rest)
 
 
 __all__ = ["parse", "search", "WILDCARD"]
