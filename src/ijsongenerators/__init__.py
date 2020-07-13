@@ -70,12 +70,6 @@ def _ijson_array_reader(parser, current=None):
     """
     materialize = yield
 
-    if current is None:
-        current = next(parser, END)
-
-    if current is END:
-        return
-
     assert current == ("start_array", None)
 
     idx = 0
@@ -92,17 +86,11 @@ def _ijson_array_reader(parser, current=None):
         idx += 1
 
 
-def _ijson_map_reader(parser, current=None):
+def _ijson_map_reader(parser, current):
     """
     reads pairs from the stream until the end_map is matched
     """
     materialize = yield
-
-    if current is None:
-        current = next(parser, END)
-
-    if current is END:
-        return
 
     assert current == ("start_map", None)
 
@@ -110,10 +98,7 @@ def _ijson_map_reader(parser, current=None):
         if event == "end_map":
             return
 
-        current = next(parser, END)
-
-        if current is END:
-            return
+        current = next(parser)
 
         with _drain_unused(_ijson_value(parser, current, materialize)) as value:
             yield (key, value)
@@ -123,16 +108,14 @@ def parse(fileobj: typing.IO, materialize=False) -> MapGenerator:
     """
     parse a JSON document and return the results as nested generators
     """
-    return with_materialize(_ijson_map_reader(ijson.basic_parse(fileobj)), materialize)
+    stream = ijson.basic_parse(fileobj)
+    return _ijson_value(stream, next(stream), materialize)
 
 
 class WILDCARD:
     """
     Match any other value in an equality check
     """
-
-    def __str__(self):
-        return "*"
 
     def __eq__(self, other):
         return True
@@ -151,7 +134,7 @@ def search(
 
     e.g: search(json, 'users' ijsongenerators.WILDCARD, 'sessions', 0, 'hash')
     """
-    return _search(_ijson_map_reader(ijson.basic_parse(fileobj)), *path)
+    return _search(parse(fileobj, None), *path)
 
 
 def _search(
@@ -165,10 +148,7 @@ def _search(
     for k, v in with_materialize(generator, leaf):
         if k == head:
             if leaf:
-                if isinstance(v, types.GeneratorType):
-                    yield from v
-                else:
-                    yield v
+                yield v
             else:
                 if isinstance(v, types.GeneratorType):
                     yield from _search(v, *rest)

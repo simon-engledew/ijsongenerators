@@ -21,8 +21,7 @@ def test_empty_map():
 
 
 def test_empty_list():
-    for k, v in ijsongenerators.parse(io.BytesIO(b'{"list": []}')):
-        assert len(list(v)) == 0
+    assert len(list(ijsongenerators.parse(io.BytesIO(b"[]")))) == 0
 
 
 def test_map_nested():
@@ -67,7 +66,7 @@ def test_search():
 
     for v in ijsongenerators.search(
         io.BytesIO(
-            b'{"moose": {"a": [1, 2, 3], "b": {"nested": [1, 2, 3]}, "c": [1, 2, 3]}}'
+            b'{"moose": {"a": [1, 2, 3], "b": {"nested": [1, 2, 3]}, "c": [1, 2, 3], "d": 1}}'
         ),
         "moose",
         "b",
@@ -80,7 +79,7 @@ def test_search():
 def test_search_wildcard():
     gen = ijsongenerators.search(
         io.BytesIO(
-            b'{"moose": {"a": [1, 2, 3], "b": {"nested": [1, 2, 3]}, "c": [4, 5, 6]}}'
+            b'{"moose": {"a": [1, 2, 3], "b": {"nested": [1, 2, 3]}, "c": [4, 5, 6]}, "d": 1}'
         ),
         ijsongenerators.WILDCARD,  # match moose / b / c
         ijsongenerators.WILDCARD,  # match a / nested / array
