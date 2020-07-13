@@ -1,10 +1,8 @@
-from typing import Generator
 import ijson
 import typing
 import contextlib
 import types
 import collections
-import threading
 
 
 END = object()
@@ -15,15 +13,30 @@ T = typing.Union[MapGenerator, ArrayGenerator, str, int, None, bool]
 
 
 @contextlib.contextmanager
-def _drain_unused(generator):
-    yield generator
-    if isinstance(generator, types.GeneratorType):
-        collections.deque(generator, maxlen=0)
+def _drain_unused(v: T):
+    """
+    drain the remaining values after a generator leaves the context
+    """
+    yield v
+    if isinstance(v, types.GeneratorType):
+        collections.deque(v, maxlen=0)
 
 
-def with_materialize(generator, value):
+def with_materialize(
+    generator: typing.Union[MapGenerator, ArrayGenerator], value: typing.Optional[bool]
+):
+    """
+    Configure the way a JSON generator returns its values
+
+    False: return nested generators
+    True: return nested Python objects
+    None: return nested generators but do not configure them
+    """
     generator.send(None)
-    yield generator.send(value)
+    try:
+        yield generator.send(value)
+    except StopIteration:
+        return
     yield from generator
 
 
@@ -35,15 +48,15 @@ def _ijson_value(parser, current, materialize):
 
     if event == "start_map":
         reader = _ijson_map_reader(parser, current=current)
-        if materialize is None:
-            return with_materialize(reader, None)
+        if materialize is False:
+            return with_materialize(reader, False)
         if materialize is True:
             return dict((k, v) for k, v in with_materialize(reader, True))
         return reader
     elif event == "start_array":
         reader = _ijson_array_reader(parser, current=current)
-        if materialize is None:
-            return with_materialize(reader, None)
+        if materialize is False:
+            return with_materialize(reader, False)
         if materialize is True:
             return [v for _, v in with_materialize(reader, True)]
         return reader
@@ -106,14 +119,21 @@ def _ijson_map_reader(parser, current=None):
             yield (key, value)
 
 
-def parse(fileobj: typing.IO,) -> MapGenerator:
+def parse(fileobj: typing.IO, materialize=False) -> MapGenerator:
     """
     parse a JSON document and return the results as nested generators
     """
-    return with_materialize(_ijson_map_reader(ijson.basic_parse(fileobj)), None)
+    return with_materialize(_ijson_map_reader(ijson.basic_parse(fileobj)), materialize)
 
 
 class WILDCARD:
+    """
+    Match any other value in an equality check
+    """
+
+    def __str__(self):
+        return "*"
+
     def __eq__(self, other):
         return True
 
@@ -140,13 +160,13 @@ def _search(
     typing.Union[typing.Dict, typing.List, bool, str, int, None], None, None
 ]:
     head, *rest = path
-    last = len(rest) == 0
+    leaf = True if len(rest) == 0 else None
 
-    for k, v in with_materialize(generator, last):
+    for k, v in with_materialize(generator, leaf):
         if k == head:
-            if last:
+            if leaf:
                 if isinstance(v, types.GeneratorType):
-                    yield from with_materialize(v, True)
+                    yield from v
                 else:
                     yield v
             else:
