@@ -24,4 +24,4 @@ for sessions in ijsongenerators.search(data, 'users', ijsongenerators.WILDCARD, 
     print(sessions[0]['username'])
 ```
 
-This will yield resolved Python objects, so make sure the search describes the exact part of the document you are interested in.
+This will yield resolved Python objects, so make sure the search describes the exact part(s) of the document you are interested in.
