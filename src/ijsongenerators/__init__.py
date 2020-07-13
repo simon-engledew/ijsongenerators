@@ -1,11 +1,12 @@
-import ijson
-import typing
+import collections
 import contextlib
 import types
-import collections
+import typing
 
+import ijson
 
 END = object()
+
 
 MapGenerator = typing.Generator[typing.Tuple[str, "T"], None, None]
 ArrayGenerator = typing.Generator[typing.Tuple[int, "T"], None, None]

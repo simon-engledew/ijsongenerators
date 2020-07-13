@@ -1,7 +1,8 @@
 import io
+
 import pytest
+
 import ijsongenerators
-import itertools
 
 
 def test_map_array():
