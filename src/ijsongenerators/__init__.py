@@ -129,6 +129,9 @@ class WILDCARD:
     def __eq__(self, other):
         return True
 
+    def __repr__(self):
+        return "*"
+
 
 WILDCARD = WILDCARD()
 
@@ -143,6 +146,8 @@ def search(
 
     e.g: search(json, 'users' ijsongenerators.WILDCARD, 'sessions', 0, 'hash')
     """
+    if len(path) == 0:
+        return []
     return _search(parse(fileobj, None), 0, path)
 
 
@@ -153,10 +158,10 @@ def _search(
 ) -> typing.Generator[
     typing.Union[typing.Dict, typing.List, bool, str, int, None], None, None
 ]:
-    if index >= len(path):
-        return
+    head, tail = path[: index + 1], path[index + 1 :]
 
-    head, current, tail = path[: index - 2], path[index], path[index + 1 :]
+    *head, current = head
+
     leaf = True if len(tail) == 0 else None
 
     for k, v in with_materialize(generator, leaf):

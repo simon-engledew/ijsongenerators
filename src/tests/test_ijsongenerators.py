@@ -92,6 +92,18 @@ def test_search_wildcard():
     assert next(gen) == (("moose", "c"), [4, 5, 6])
 
 
+def test_search_nested():
+    path = (
+        "moose",  # {}
+        ijsongenerators.WILDCARD,  # []
+        ijsongenerators.WILDCARD,  # {}
+    )
+    gen = ijsongenerators.search(
+        io.BytesIO(b"""{"moose":[{"goose":[{"house":[{"truce":0}]}]}]}"""), *path
+    )
+    assert list(gen) == [(("moose", 0, "goose"), [{"house": [{"truce": 0}]}])]
+
+
 def test_search_miss():
     for path, v in ijsongenerators.search(io.BytesIO(b'{"moose": 1}'),):
         print(path)
