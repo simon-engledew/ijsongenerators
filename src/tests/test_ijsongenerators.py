@@ -92,6 +92,11 @@ def test_search_wildcard():
     assert next(gen) == (("moose", "c"), [4, 5, 6])
 
 
+def test_search_miss():
+    for path, v in ijsongenerators.search(io.BytesIO(b'{"moose": 1}'),):
+        print(path)
+
+
 def test_skip_nested():
     expected = {"d": 1, "e": 2, "f": 3}
     for k, v in ijsongenerators.parse(

@@ -153,6 +153,9 @@ def _search(
 ) -> typing.Generator[
     typing.Union[typing.Dict, typing.List, bool, str, int, None], None, None
 ]:
+    if index >= len(path):
+        return
+
     head, current, tail = path[: index - 2], path[index], path[index + 1 :]
     leaf = True if len(tail) == 0 else None
 
