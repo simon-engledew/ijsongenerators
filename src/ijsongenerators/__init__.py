@@ -1,13 +1,19 @@
 # coding: utf-8
 
+import abc
 import collections
 import contextlib
 import types
 import typing
-
 import ijson
 
 END = object()
+
+
+class Equal(typing.Protocol):
+    @abc.abstractmethod
+    def __eq__(self, other: typing.Any) -> bool:
+        pass
 
 
 MapGenerator = typing.Generator[typing.Tuple[str, "T"], None, None]
@@ -128,7 +134,7 @@ WILDCARD = WILDCARD()
 
 
 def search(
-    fileobj: typing.IO, *path: typing.Union[str, int]
+    fileobj: typing.IO, *path: typing.Union[Equal]
 ) -> typing.Generator[
     typing.Union[typing.Dict, typing.List, bool, str, int, None], None, None
 ]:
@@ -137,24 +143,26 @@ def search(
 
     e.g: search(json, 'users' ijsongenerators.WILDCARD, 'sessions', 0, 'hash')
     """
-    return _search(parse(fileobj, None), *path)
+    return _search(parse(fileobj, None), 0, path)
 
 
 def _search(
-    generator: typing.Union[MapGenerator, ArrayGenerator], *path: typing.Union[str, int]
+    generator: typing.Union[MapGenerator, ArrayGenerator],
+    index: int,
+    path: typing.Union[Equal],
 ) -> typing.Generator[
     typing.Union[typing.Dict, typing.List, bool, str, int, None], None, None
 ]:
-    head, *rest = path
-    leaf = True if len(rest) == 0 else None
+    head, current, tail = path[: index - 2], path[index], path[index + 1 :]
+    leaf = True if len(tail) == 0 else None
 
     for k, v in with_materialize(generator, leaf):
-        if k == head:
+        if k == current:
             if leaf:
-                yield v
+                yield (*head, k), v
             else:
                 if isinstance(v, types.GeneratorType):
-                    yield from _search(v, *rest)
+                    yield from _search(v, index + 1, (*head, k, *tail))
 
 
 __all__ = ["parse", "search", "WILDCARD"]

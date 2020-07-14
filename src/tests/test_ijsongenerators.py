@@ -57,7 +57,7 @@ def test_skip_array():
 
 
 def test_search():
-    for v in ijsongenerators.search(
+    for path, v in ijsongenerators.search(
         io.BytesIO(
             b'{"moose": {"a": [1, 2, 3], "b": {"nested": [1, 2, 3]}, "c": [1, 2, 3]}}'
         ),
@@ -67,7 +67,7 @@ def test_search():
     ):
         assert v == 3
 
-    for v in ijsongenerators.search(
+    for path, v in ijsongenerators.search(
         io.BytesIO(
             b'{"moose": {"a": [1, 2, 3], "b": {"nested": [1, 2, 3]}, "c": [1, 2, 3], "d": 1}}'
         ),
@@ -87,9 +87,9 @@ def test_search_wildcard():
         ijsongenerators.WILDCARD,  # match moose / b / c
         ijsongenerators.WILDCARD,  # match a / nested / array
     )
-    assert next(gen) == [1, 2, 3]
-    assert next(gen) == {"nested": [1, 2, 3]}
-    assert next(gen) == [4, 5, 6]
+    assert next(gen) == (("moose", "a"), [1, 2, 3])
+    assert next(gen) == (("moose", "b"), {"nested": [1, 2, 3]})
+    assert next(gen) == (("moose", "c"), [4, 5, 6])
 
 
 def test_skip_nested():

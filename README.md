@@ -20,8 +20,8 @@ Each generator will yield string value pairs or number value indexed array entri
 It can also do a wildcard search for any matching objects at a path:
 
 ```python
-for sessions in ijsongenerators.search(data, 'users', ijsongenerators.WILDCARD, 'sessions'):
-    print(sessions[0]['username'])
+for path, sessions in ijsongenerators.search(data, 'users', ijsongenerators.WILDCARD, 'sessions'):
+    print("found: ", sessions[0]['username'], " at ", path)
 ```
 
 This will yield resolved Python objects, so make sure the search describes the exact part(s) of the document you are interested in.
