@@ -1,45 +1,59 @@
 # coding: utf-8
+"""
+This module wraps the ijson_ library with some convienence functions.
 
-import abc
+`search` allows you to wildcard index into a document::
+
+  for path, found in ijsongenerators.search(jsonio, *ijsongenerators.parse_path("level-1.[0].*"):
+        print(found, " at ", path)
+
+and will only resolve the search results into Python objects. The rest of the document will
+not be deserialized.
+
+`parse` will create nested generators that allow you to iterate through each level of the document::
+
+  for key, values in ijsongenerators.parse(jsonio):
+      for index, value in values:
+          print(key, value)
+
+With this you can happily traverse JSON that is much larger than the available system memory.
+
+.. _ijson: https://pypi.org/project/ijson/
+
+"""
+
 import collections
 import contextlib
 import types
 import typing
+import re
+
+from . import aliases
+
 import ijson
-
-END = object()
-
-
-class Equal(typing.Protocol):
-    @abc.abstractmethod
-    def __eq__(self, other: typing.Any) -> bool:
-        pass
-
-
-MapGenerator = typing.Generator[typing.Tuple[str, "T"], None, None]
-ArrayGenerator = typing.Generator[typing.Tuple[int, "T"], None, None]
-T = typing.Union[MapGenerator, ArrayGenerator, str, int, None, bool]
 
 
 @contextlib.contextmanager
-def _drain_unused(v: T):
+def _drain_unused(v: aliases.IterValue):
     """
-    drain the remaining values after a generator leaves the context
+    Drain the remaining values after a generator leaves the context
+
+    :param v: A value or iterable of values
     """
     yield v
     if isinstance(v, types.GeneratorType):
         collections.deque(v, maxlen=0)
 
 
-def with_materialize(
-    generator: typing.Union[MapGenerator, ArrayGenerator], value: typing.Optional[bool]
-):
+def materialize(
+    generator: aliases.NestedGenerator, value: typing.Optional[bool]
+) -> typing.Generator[typing.Union[aliases.IterValue, aliases.Value], None, None]:
     """
     Configure the way a JSON generator returns its values
 
-    False: return nested generators
-    True: return nested Python objects
-    None: return nested generators but do not configure them
+    :param aliases.NestedGenerator generator: A reader created with _materialize=None
+    :param value: *False:* Always return nested generators. *True:* Read the document into full Python objects. *None:* return nested generators but do not configure them.
+    :rtype: typing.Generator[typing.Union[aliases.IterValue, aliases.Value], None, None]
     """
     generator.send(None)
     try:
@@ -49,25 +63,25 @@ def with_materialize(
     yield from generator
 
 
-def _ijson_value(parser, current, materialize):
+def _ijson_value(parser, current, _materialize):
     """
-    dispatches the current event to the correct reader or returns value if it is a literal
+    Dispatches the current event to the correct reader or returns value if it is a literal
     """
     event, value = current
 
     if event == "start_map":
         reader = _ijson_map_reader(parser, current=current)
-        if materialize is False:
-            return with_materialize(reader, False)
-        if materialize is True:
-            return dict((k, v) for k, v in with_materialize(reader, True))
+        if _materialize is False:
+            return materialize(reader, False)
+        if _materialize is True:
+            return dict((k, v) for k, v in materialize(reader, True))
         return reader
     elif event == "start_array":
         reader = _ijson_array_reader(parser, current=current)
-        if materialize is False:
-            return with_materialize(reader, False)
-        if materialize is True:
-            return [v for _, v in with_materialize(reader, True)]
+        if _materialize is False:
+            return materialize(reader, False)
+        if _materialize is True:
+            return [v for _, v in materialize(reader, True)]
         return reader
     else:
         return value
@@ -75,9 +89,9 @@ def _ijson_value(parser, current, materialize):
 
 def _ijson_array_reader(parser, current=None):
     """
-    reads items from the stream until the end_array is matched
+    Reads items from the stream until the end_array is matched
     """
-    materialize = yield
+    _materialize = yield
 
     assert current == ("start_array", None)
 
@@ -89,7 +103,7 @@ def _ijson_array_reader(parser, current=None):
         if event == "end_array":
             return
 
-        with _drain_unused(_ijson_value(parser, current, materialize)) as value:
+        with _drain_unused(_ijson_value(parser, current, _materialize)) as value:
             yield (idx, value)
 
         idx += 1
@@ -97,9 +111,9 @@ def _ijson_array_reader(parser, current=None):
 
 def _ijson_map_reader(parser, current):
     """
-    reads pairs from the stream until the end_map is matched
+    Reads pairs from the stream until the end_map is matched
     """
-    materialize = yield
+    _materialize = yield
 
     assert current == ("start_map", None)
 
@@ -109,23 +123,21 @@ def _ijson_map_reader(parser, current):
 
         current = next(parser)
 
-        with _drain_unused(_ijson_value(parser, current, materialize)) as value:
+        with _drain_unused(_ijson_value(parser, current, _materialize)) as value:
             yield (key, value)
 
 
-def parse(fileobj: typing.IO, materialize=False) -> MapGenerator:
+def parse(fileobj: typing.IO, materialize=False) -> typing.Union[aliases.IterValue, aliases.Value]:
     """
     parse a JSON document and return the results as nested generators
+
+    :rtype: typing.Union[aliases.IterValue, aliases.Value]
     """
     stream = ijson.basic_parse(fileobj)
     return _ijson_value(stream, next(stream), materialize)
 
 
 class WILDCARD:
-    """
-    Match any other value in an equality check
-    """
-
     def __eq__(self, other):
         return True
 
@@ -134,17 +146,48 @@ class WILDCARD:
 
 
 WILDCARD = WILDCARD()
+"""
+Match any other value in an equality check
+"""
 
 
-def search(
-    fileobj: typing.IO, *path: typing.Union[Equal]
-) -> typing.Generator[
-    typing.Union[typing.Dict, typing.List, bool, str, int, None], None, None
-]:
+ARRAY_INDEX = re.compile("^\[\d+\]$")
+
+
+def _parse_component(s: str) -> typing.Union[str, int]:
+    if s == "*":
+        return WILDCARD
+    if ARRAY_INDEX.match(s):
+        return int(s[1:-1])
+    return s
+
+
+def parse_path(s: str) -> typing.Tuple[typing.Union[str, WILDCARD.__class__]]:
     """
-    return a list of all matching items at path, where path is a list of keys
+    Similar syntax to the ijson path, but supports array indexes::
 
-    e.g: search(json, 'users' ijsongenerators.WILDCARD, 'sessions', 0, 'hash')
+        "key.[0]"
+
+    And wildcards::
+
+        "key.*"
+    """
+    return tuple(_parse_component(component) for component in s.split("."))
+
+
+def search(fileobj: typing.IO, *path: typing.Any) -> typing.Generator[aliases.Value, None, None]:
+    """
+    Return a list of all matching items at `path`, where `path` is a list of keys:
+
+    ::
+
+        ijsongenerators.search(jsonio, 'users' ijsongenerators.WILDCARD, 'sessions', 0, 'hash')
+
+    Will index into the document at: `users.*.sessions.*.hash`
+
+    :param fileobj: an IO to read the JSON data from
+    :param path: a path to a section of the document
+    :rtype: aliases.Value
     """
     if len(path) == 0:
         return []
@@ -152,19 +195,15 @@ def search(
 
 
 def _search(
-    generator: typing.Union[MapGenerator, ArrayGenerator],
-    index: int,
-    path: typing.Union[Equal],
-) -> typing.Generator[
-    typing.Union[typing.Dict, typing.List, bool, str, int, None], None, None
-]:
+    generator: aliases.NestedGenerator, index: int, path: typing.List[typing.Any],
+) -> typing.Generator[aliases.Value, None, None]:
     head, tail = path[: index + 1], path[index + 1 :]
 
     *head, current = head
 
     leaf = True if len(tail) == 0 else None
 
-    for k, v in with_materialize(generator, leaf):
+    for k, v in materialize(generator, leaf):
         if k == current:
             if leaf:
                 yield (*head, k), v
@@ -173,5 +212,5 @@ def _search(
                     yield from _search(v, index + 1, (*head, k, *tail))
 
 
-__all__ = ["parse", "search", "WILDCARD"]
+__all__ = ["parse", "search", "WILDCARD", "parse_path"]
 
