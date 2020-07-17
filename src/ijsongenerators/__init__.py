@@ -202,7 +202,11 @@ def parse_path(s: str) -> typing.Tuple[Equality, ...]:
     return tuple(_parse_component(component) for component in s.split("."))
 
 
-def search(fileobj: typing.IO, *path: typing.Any) -> typing.Generator[Value, None, None]:
+SearchValue = typing.Tuple[typing.Tuple[Equality, ...], Value]
+SearchGenerator = typing.Generator[SearchValue, None, None]
+
+
+def search(fileobj: typing.IO, *path: Equality) -> SearchGenerator:
     """
     Return a list of all matching items at `path`, where `path` is a list of keys:
 
@@ -214,22 +218,22 @@ def search(fileobj: typing.IO, *path: typing.Any) -> typing.Generator[Value, Non
 
     :param fileobj: an IO to read the JSON data from
     :param path: a path to a section of the document
-    :rtype: Value
+    :rtype: SearchGenerator
     """
     if len(path) == 0:
-        return iter([])
+        return typing.cast(SearchGenerator, iter([]))
 
     parsed = parse(fileobj, None)
 
     if not isinstance(parsed, types.GeneratorType):
-        return iter([])
+        return typing.cast(SearchGenerator, iter([]))
 
     return _search(typing.cast(NestedGenerator, parsed), 0, path)
 
 
 def _search(
-    generator: NestedGenerator, index: int, path: typing.List[typing.Any],
-) -> typing.Generator[Value, None, None]:
+    generator: NestedGenerator, index: int, path: typing.List[Equality],
+) -> typing.Generator[SearchValue, None, None]:
     head, tail = path[: index + 1], path[index + 1 :]
 
     *head, current = head
@@ -239,7 +243,7 @@ def _search(
     for k, v in materialize(generator, leaf):
         if k == current:
             if leaf:
-                yield (*head, k), v
+                yield (*head, k), typing.cast(Value, v)
             else:
                 if isinstance(v, types.GeneratorType):
                     yield from _search(v, index + 1, (*head, k, *tail))
