@@ -164,6 +164,10 @@ def test_basic(data):
     ]
 
 
+def test_search_literal():
+    assert list(ijsongenerators.search(io.BytesIO(b"1"), "*")) == []
+
+
 def test_parse_path():
     path = ijsongenerators.parse_path("level-1.[0].*.[0].level-3a.*.b")
     assert path == ("level-1", 0, ijsongenerators.WILDCARD, 0, "level-3a", ijsongenerators.WILDCARD, "b")

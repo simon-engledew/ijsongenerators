@@ -22,19 +22,39 @@ With this you can happily traverse JSON that is much larger than the available s
 
 """
 
+import abc
 import collections
 import contextlib
 import types
 import typing
 import re
 
-from . import aliases
-
 import ijson
 
 
+MapGenerator = typing.Generator[typing.Tuple[str, "IterValue"], typing.Optional[bool], None]
+ArrayGenerator = typing.Generator[typing.Tuple[int, "IterValue"], typing.Optional[bool], None]
+NestedGenerator = typing.Union[MapGenerator, ArrayGenerator]
+"""
+Generates array (int, T) or object (str, T) values during parsing of a JSON document.
+"""
+
+Value = typing.Union[typing.Dict, typing.List, bool, str, int, float, None]
+"""
+A value in the JSON document that has been deserialized into a Python object
+"""
+
+IterValue = typing.Union[NestedGenerator, str, int, None, bool]
+"""
+A leaf value in the JSON document or a generator into another nested value.
+"""
+ValueGenerator = typing.Generator[
+    typing.Tuple[typing.Union[str, int], typing.Union[IterValue, Value]], typing.Optional[bool], None
+]
+
+
 @contextlib.contextmanager
-def _drain_unused(v: aliases.IterValue):
+def _drain_unused(v: IterValue):
     """
     Drain the remaining values after a generator leaves the context
 
@@ -45,15 +65,13 @@ def _drain_unused(v: aliases.IterValue):
         collections.deque(v, maxlen=0)
 
 
-def materialize(
-    generator: aliases.NestedGenerator, value: typing.Optional[bool]
-) -> typing.Generator[typing.Union[aliases.IterValue, aliases.Value], None, None]:
+def materialize(generator: NestedGenerator, value: typing.Optional[bool]) -> ValueGenerator:
     """
     Configure the way a JSON generator returns its values
 
-    :param aliases.NestedGenerator generator: A reader created with _materialize=None
+    :param NestedGenerator generator: A reader created with _materialize=None
     :param value: *False:* Always return nested generators. *True:* Read the document into full Python objects. *None:* return nested generators but do not configure them.
-    :rtype: typing.Generator[typing.Union[aliases.IterValue, aliases.Value], None, None]
+    :rtype: typing.Generator[typing.Union[IterValue, Value], None, None]
     """
     generator.send(None)
     try:
@@ -127,34 +145,43 @@ def _ijson_map_reader(parser, current):
             yield (key, value)
 
 
-def parse(fileobj: typing.IO, materialize=False) -> typing.Union[aliases.IterValue, aliases.Value]:
+def parse(fileobj: typing.IO, materialize=False) -> ValueGenerator:
     """
     parse a JSON document and return the results as nested generators
 
-    :rtype: typing.Union[aliases.IterValue, aliases.Value]
+    :rtype: ValueGenerator
     """
     stream = ijson.basic_parse(fileobj)
     return _ijson_value(stream, next(stream), materialize)
 
 
+class Equality(typing.Protocol):
+    @abc.abstractmethod
+    def __eq__(self, other: typing.Any) -> bool:
+        pass
+
+
+def singleton(cls):
+    return cls()
+
+
+@singleton
 class WILDCARD:
-    def __eq__(self, other):
+    """
+    Match any other value in an equality check
+    """
+
+    def __eq__(self, _):
         return True
 
     def __repr__(self):
         return "*"
 
 
-WILDCARD = WILDCARD()
-"""
-Match any other value in an equality check
-"""
-
-
 ARRAY_INDEX = re.compile("^\[\d+\]$")
 
 
-def _parse_component(s: str) -> typing.Union[str, int]:
+def _parse_component(s: str) -> Equality:
     if s == "*":
         return WILDCARD
     if ARRAY_INDEX.match(s):
@@ -162,7 +189,7 @@ def _parse_component(s: str) -> typing.Union[str, int]:
     return s
 
 
-def parse_path(s: str) -> typing.Tuple[typing.Union[str, WILDCARD.__class__]]:
+def parse_path(s: str) -> typing.Tuple[Equality, ...]:
     """
     Similar syntax to the ijson path, but supports array indexes::
 
@@ -175,7 +202,7 @@ def parse_path(s: str) -> typing.Tuple[typing.Union[str, WILDCARD.__class__]]:
     return tuple(_parse_component(component) for component in s.split("."))
 
 
-def search(fileobj: typing.IO, *path: typing.Any) -> typing.Generator[aliases.Value, None, None]:
+def search(fileobj: typing.IO, *path: typing.Any) -> typing.Generator[Value, None, None]:
     """
     Return a list of all matching items at `path`, where `path` is a list of keys:
 
@@ -187,16 +214,22 @@ def search(fileobj: typing.IO, *path: typing.Any) -> typing.Generator[aliases.Va
 
     :param fileobj: an IO to read the JSON data from
     :param path: a path to a section of the document
-    :rtype: aliases.Value
+    :rtype: Value
     """
     if len(path) == 0:
-        return []
-    return _search(parse(fileobj, None), 0, path)
+        return iter([])
+
+    parsed = parse(fileobj, None)
+
+    if not isinstance(parsed, types.GeneratorType):
+        return iter([])
+
+    return _search(typing.cast(NestedGenerator, parsed), 0, path)
 
 
 def _search(
-    generator: aliases.NestedGenerator, index: int, path: typing.List[typing.Any],
-) -> typing.Generator[aliases.Value, None, None]:
+    generator: NestedGenerator, index: int, path: typing.List[typing.Any],
+) -> typing.Generator[Value, None, None]:
     head, tail = path[: index + 1], path[index + 1 :]
 
     *head, current = head
